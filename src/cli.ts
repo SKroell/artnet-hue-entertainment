@@ -1,27 +1,23 @@
 #!/usr/bin/env node
 import * as minimist from 'minimist';
 import {v3, discovery, ApiError} from 'node-hue-api';
-import {ArtNetHueBridge, LightConfiguration} from './bridge';
-import * as nconf from 'nconf';
-import {stat, open} from 'fs/promises';
+import {ConfigStore, getHubOrThrow, HubConfig, LightConfiguration, makeHubId} from './config';
+import {ArtNetDmxSource} from './artnet';
+import {HueEntertainmentRunner} from './hue-runner';
+import {startWebUi} from './web/server';
 const LightState = v3.lightStates.LightState;
-
-const CONFIG_FILE_PATH = 'config.json';
 
 class ArtNetHueEntertainmentCliHandler {
 
-    private config: nconf.Provider;
     private readonly args: string[];
+    private readonly store = new ConfigStore();
 
     constructor(args: string[]) {
-        this.config = nconf.argv().env();
         this.args = args;
     }
 
     async run() {
-        await this.checkOrCreateConfigFile();
-        // TODO: Handle config parsing errors
-        this.config = this.config.file(CONFIG_FILE_PATH);
+        const config = await this.store.load();
 
         if (this.args.length === 0) {
             this.printHelp();
@@ -31,37 +27,53 @@ class ArtNetHueEntertainmentCliHandler {
         if (this.args[0] === 'discover') {
             await this.discoverBridges();
         } else if (this.args[0] === 'pair') {
-            await this.runPair(this.args.slice(1));
+            await this.runPair(config, this.args.slice(1));
         } else if (this.args[0] === 'run') {
-            await this.startProcess();
+            await this.startProcess(config, this.args.slice(1));
         } else if (this.args[0] === 'list-rooms') {
-            await this.listEntertainmentRooms();
+            await this.listEntertainmentRooms(config, this.args.slice(1));
         } else if (this.args[0] === 'ping-light') {
-            await this.pingLight(this.args.slice(1));
+            await this.pingLight(config, this.args.slice(1));
         } else if (this.args[0] === 'ping-lights') {
-            await this.pingLight(["all"]);
+            await this.pingLight(config, ["--id", "all"]);
         } else if (this.args[0] === 'list-lights') {
-            await this.listAllLights();
+            await this.listAllLights(config, this.args.slice(1));
         } else if(this.args[0] === 'rename-lights-after-id' ){
-            await this.renameLightsAfterID();
+            await this.renameLightsAfterID(config, this.args.slice(1));
         } else if(this.args[0] === 'auto-setup') {
-            await this.autoSetup();
+            await this.autoSetup(config, this.args.slice(1));
+        } else if (this.args[0] === 'web') {
+            const args = minimist(this.args.slice(1), {default: {port: 8787}});
+            const port = Number(args.port) || 8787;
+            await startWebUi({port});
         } else {
             this.printHelp();
             return;
         }
     }
 
-    async autoSetup() {
-        const hueApi = await v3.api.createLocal(this.config.get("hue:host"))
-            .connect(this.config.get("hue:username"));
+    async autoSetup(config: any, argv: string[]) {
+        const args = minimist(argv, {string: ['hub']});
+        const hub = getHubOrThrow(config, args.hub);
+
+        const hueApi = await v3.api.createLocal(hub.host).connect(hub.username);
 
         const rooms = await hueApi.groups.getEntertainment();
+        if (!rooms.length) {
+            console.error('No entertainment rooms found on this hub.');
+            process.exit(1);
+        }
 
+        // If not set, pick the first entertainment room.
+        if (!hub.entertainmentRoomId) {
+            hub.entertainmentRoomId = String(rooms[0].id);
+        }
+        const room = rooms.find(r => String(r.id) === hub.entertainmentRoomId) ?? rooms[0];
+        hub.entertainmentRoomId = String(room.id);
 
-        const sortedLights = rooms[0].lights.map((light, index) => {
+        const sortedLights = room.lights.map((light, index) => {
             return {
-                "lightId": Number(light),
+                "lightId": String(light),
                 "dmxStart": 3 * (index) + 1,
                 "channelMode": "8bit",
             }
@@ -70,12 +82,12 @@ class ArtNetHueEntertainmentCliHandler {
         console.log('Setting up lights...');
         console.log(sortedLights);
 
-        this.config.set('hue:lights', sortedLights);
-        this.config.save(null);
+        hub.lights = sortedLights as any;
+        await this.store.save(config);
     }
 
     printHelp() {
-        console.log('Usage: artnet-hue-entertainment <discover|pair|config-path|run> [options]');
+        console.log('Usage: artnet-hue-entertainment <discover|pair|run|list-rooms|list-lights|ping-light|ping-lights|auto-setup|rename-lights-after-id|web> [options]');
         console.log('');
         console.log('Control Philips/Signify Hue lights using ArtNet.');
         console.log('');
@@ -83,18 +95,22 @@ class ArtNetHueEntertainmentCliHandler {
         console.log('  discover                Discover all Hue bridges on your network. When you know the IP address of the bridge, run \'pair\' directly.');
         console.log('  pair                    Pair with a Hue bridge. Press the link button on the bridge before running');
         console.log('    --ip                  The IP address of the Hue bridge. Both IPv4 and IPv6 are supported.');
+        console.log('    --name                Optional friendly name for this hub.');
         console.log('  ping-light              Indicated a light.');
         console.log('    --id                  The id of the light to indicate. If the is "all" then all lights will be indicated.');
+        console.log('    --hub                 Hub id (defaults to first configured hub).');
         console.log('  list-rooms              List all available entertainment rooms.');
         console.log('  list-lights             List all available lights.');
         console.log('  rename-lights-after-id  Renames every light after it`s id.');
         console.log('  run                     Run the ArtNet to Hue bridge.');
+        console.log('  web                     Start a local web UI for configuring hubs.');
+        console.log('    --port                Port for the web UI (default 8787).');
         process.exit(1);
     }
 
-    async runPair(argv: string[]) {
+    async runPair(config: any, argv: string[]) {
         const args = minimist(argv, {
-            string: ['ip'],
+            string: ['ip', 'name'],
         });
 
         if (!('ip' in args) || args.ip.length === 0) {
@@ -104,28 +120,51 @@ class ArtNetHueEntertainmentCliHandler {
         }
 
         try {
-            const host: string = args.ip;
+            const host: string = String(args.ip);
             const api = await v3.api.createLocal(host).connect();
             const user = await api.users.createUser('artnet-hue-entertainment', 'cli');
+            if (!user.clientkey) {
+                throw new Error('Pairing did not return a client key. Is your bridge updated for Entertainment streaming?');
+            }
 
-            this.config.set('hue:host', host);
-            this.config.set('hue:username', user.username);
-            this.config.set('hue:clientKey', user.clientkey);
-            this.config.set('hue:lights', [
-                {
-                    lightId: '1',
-                    dmxStart: 1,
-                    channelMode: '8bit-dimmable',
-                },
-                {
-                    lightId: '2',
-                    dmxStart: 5,
-                    channelMode: '8bit-dimmable',
-                }
-            ]);
-            this.config.save(null);
+            let bridgeName: string | undefined = args.name;
+            let bridgeId: string | undefined = undefined;
+            try {
+                const authApi = await v3.api.createLocal(host).connect(user.username);
+                // node-hue-api exposes configuration on v3
+                const cfg: any = await (authApi as any).configuration.getConfiguration();
+                bridgeName = bridgeName ?? cfg?.name;
+                bridgeId = cfg?.bridgeid;
+            } catch {
+                // ignore - pairing still succeeded
+            }
 
-            console.log('Hue setup was successful! Credentials are saved. You can run the server now.')
+            const hubId = makeHubId({bridgeId, host, name: bridgeName});
+            const hub: HubConfig = {
+                id: hubId,
+                name: bridgeName,
+                host,
+                username: user.username,
+                clientKey: user.clientkey,
+                entertainmentRoomId: undefined,
+                artNetUniverse: (config.hubs?.[0]?.artNetUniverse ?? 11),
+                lights: [],
+            };
+
+            config.version = 2;
+            config.artnet = config.artnet ?? {bindIp: '0.0.0.0'};
+            config.hubs = Array.isArray(config.hubs) ? config.hubs : [];
+
+            const existingIdx = config.hubs.findIndex((h: HubConfig) => h.id === hubId);
+            if (existingIdx !== -1) {
+                config.hubs[existingIdx] = hub;
+            } else {
+                config.hubs.push(hub);
+            }
+            await this.store.save(config);
+
+            console.log(`Hue setup was successful! Added hub "${hubId}".`);
+            console.log('Next: choose an entertainment room (list-rooms) and configure lights (auto-setup or web UI).');
 
         } catch (e) {
             const error = e as ApiError;
@@ -155,64 +194,95 @@ class ArtNetHueEntertainmentCliHandler {
         });
     }
 
-    async startProcess() {
-        // TODO: Detect when setup has not yet been run
-        const host = this.config.get('hue:host') as string;
-        const username = this.config.get('hue:username') as string;
-        const clientKey = this.config.get('hue:clientKey') as string;
-        const lights = this.config.get('hue:lights') as LightConfiguration[];
-        if (host === undefined || username === undefined || clientKey === undefined) {
-            console.log('No Hue bridge is paired yet. Please pair a bridge first');
+    async startProcess(config: any, argv: string[]) {
+        const args = minimist(argv, {string: ['hub']});
+        const hubs: HubConfig[] = Array.isArray(config.hubs) ? config.hubs : [];
+        if (hubs.length === 0) {
+            console.log('No Hue hub is paired yet. Please pair a hub first');
             return;
         }
 
-        if(lights.some(light => light.channelMode === undefined || (light.channelMode !== "8bit" && light.channelMode !== "8bit-dimmable" && light.channelMode !== "16bit"))) {
-            const light = lights.find(light => light.channelMode === undefined || (light.channelMode !== "8bit" && light.channelMode !== "8bit-dimmable" && light.channelMode !== "16bit"));
-            console.error('Invalid channel mode in light configuration (lightId ' + light!.lightId + '). Valid values are: 8bit, 8bit-dimmable, 16bit');
-            process.exit(1);
-        }
+        const selectedHubs = args.hub ? [getHubOrThrow(config, args.hub)] : hubs;
 
-        const bridge = new ArtNetHueBridge({
-            hueHost: host,
-            hueUsername: username,
-            hueClientKey: clientKey,
-            entertainmentRoomId: 200,
-            artNetBindIp: this.config.get("artnet:host"),
-            artNetUniverse: this.config.get("artnet:universe"),
-            lights: lights,
+        selectedHubs.forEach(hub => {
+            if (!hub.host || !hub.username || !hub.clientKey) {
+                console.error(`Hub "${hub.id}" is missing credentials. Pair it again.`);
+                process.exit(1);
+            }
+            if (!hub.entertainmentRoomId) {
+                console.error(`Hub "${hub.id}" has no entertainment room configured. Run list-rooms and set entertainmentRoomId (or use the web UI).`);
+                process.exit(1);
+            }
+            if (!Array.isArray(hub.lights) || hub.lights.length === 0) {
+                console.error(`Hub "${hub.id}" has no lights configured. Run auto-setup (or use the web UI).`);
+                process.exit(1);
+            }
+            if (hub.lights.some(light => light.channelMode === undefined || (light.channelMode !== "8bit" && light.channelMode !== "8bit-dimmable" && light.channelMode !== "16bit"))) {
+                const light = hub.lights.find(light => light.channelMode === undefined || (light.channelMode !== "8bit" && light.channelMode !== "8bit-dimmable" && light.channelMode !== "16bit"));
+                console.error(`Invalid channel mode in light configuration (hub ${hub.id}, lightId ${light!.lightId}). Valid values are: 8bit, 8bit-dimmable, 16bit`);
+                process.exit(1);
+            }
         });
-        await bridge.start();
+
+        const bindIp = config.artnet?.bindIp ?? '0.0.0.0';
+        const dmxSource = new ArtNetDmxSource(bindIp);
+        dmxSource.start();
+
+        const runners = selectedHubs.map(h => new HueEntertainmentRunner(h));
+        await Promise.all(runners.map(r => r.start()));
+
+        dmxSource.on('dmx', (dmx: any) => {
+            for (const runner of runners) {
+                runner.handleDmx(dmx);
+            }
+        });
+
+        const shutdownHandler = () => {
+            process.off('SIGINT', shutdownHandler);
+            console.log('Received shutdown signal. Closing Hue connections...');
+            Promise.all([
+                ...runners.map(r => r.close().catch(() => undefined)),
+                dmxSource.close().catch(() => undefined),
+            ]).then(() => process.exit(0));
+        };
+        process.on('SIGINT', shutdownHandler);
     }
 
-    async listEntertainmentRooms() {
-        const hueApi = await v3.api.createLocal(this.config.get("hue:host"))
-          .connect(this.config.get("hue:username"));
+    async listEntertainmentRooms(config: any, argv: string[]) {
+        const args = minimist(argv, {string: ['hub']});
+        const hub = getHubOrThrow(config, args.hub);
+
+        const hueApi = await v3.api.createLocal(hub.host).connect(hub.username);
 
         const rooms = await hueApi.groups.getEntertainment();
         const roomsCleaned = rooms.map(r => {
             return " - Room " + r.id + ": " + r.name + " (Lights: " + r.lights.join(", ") + ")";
         })
-        console.log('Available entertainment rooms:');
+        console.log(`Available entertainment rooms (hub ${hub.id}):`);
         console.log(roomsCleaned.join(", "));
     }
 
-    async listAllLights() {
-        const hueApi = await v3.api.createLocal(this.config.get("hue:host"))
-          .connect(this.config.get("hue:username"));
+    async listAllLights(config: any, argv: string[]) {
+        const args = minimist(argv, {string: ['hub']});
+        const hub = getHubOrThrow(config, args.hub);
+
+        const hueApi = await v3.api.createLocal(hub.host).connect(hub.username);
 
         const rooms = await hueApi.lights.getAll();
         const lightsCleaned = rooms.map(r => {
             return " - Light " + r.id + ": " + r.name
         })
-        console.log('Available lights:');
+        console.log(`Available lights (hub ${hub.id}):`);
         lightsCleaned.forEach(light => {
             console.log(light);
         })
     }
 
-    async renameLightsAfterID() {
-        const hueApi = await v3.api.createLocal(this.config.get("hue:host"))
-          .connect(this.config.get("hue:username"));
+    async renameLightsAfterID(config: any, argv: string[]) {
+        const args = minimist(argv, {string: ['hub']});
+        const hub = getHubOrThrow(config, args.hub);
+
+        const hueApi = await v3.api.createLocal(hub.host).connect(hub.username);
 
         const allLights = await hueApi.lights.getAll();
         for (const lightType of allLights) {
@@ -228,9 +298,9 @@ class ArtNetHueEntertainmentCliHandler {
         }
     }
 
-    async pingLight(argv: string[]) {
+    async pingLight(config: any, argv: string[]) {
         const args = minimist(argv, {
-            string: ['id'],
+            string: ['id', 'hub'],
         });
 
         if (!('id' in args) || args.id.length === 0) {
@@ -241,8 +311,8 @@ class ArtNetHueEntertainmentCliHandler {
 
         const lightId: string | number = args.id;
 
-        const hueApi = await v3.api.createLocal(this.config.get("hue:host"))
-          .connect(this.config.get("hue:username"));
+        const hub = getHubOrThrow(config, args.hub);
+        const hueApi = await v3.api.createLocal(hub.host).connect(hub.username);
 
         if(lightId === "all"){
             const timer = (ms: number | undefined) => new Promise(res => setTimeout(res, ms))
@@ -276,22 +346,6 @@ class ArtNetHueEntertainmentCliHandler {
             }
 
             console.log(`Light ${lightId} pinged.`);
-        }
-    }
-
-    private async checkOrCreateConfigFile() {
-        let exists: boolean;
-        try {
-            const fileInfo = await stat(CONFIG_FILE_PATH);
-            exists = fileInfo.isFile();
-        } catch (e) {
-            exists = false;
-        }
-
-        if (!exists) {
-            const fd = await open(CONFIG_FILE_PATH, 'w');
-            await fd.write('{"artnet": {"host": "127.0.0.1", "universe": 11}}');
-            await fd.close();
         }
     }
 }

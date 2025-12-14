@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ArtNet Hue Entertainment</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="logo">AH</div>
+          <div>
+            <div class="title">ArtNet Hue Entertainment</div>
+            <div class="subtitle">Multi-hub configuration</div>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <button id="btnSave" class="btn primary">Save</button>
+          <button id="btnReload" class="btn">Reload</button>
+        </div>
+      </header>
+
+      <main class="content">
+        <section class="card">
+          <h2>Hubs</h2>
+          <p class="muted">
+            Add multiple Hue hubs so you can stream multiple entertainment areas at the same time.
+          </p>
+
+          <div class="grid2">
+            <div class="panel">
+              <div class="panel-title">Discover hubs</div>
+              <div class="panel-body">
+                <div class="row">
+                  <button id="btnDiscover" class="btn">Discover</button>
+                  <span id="discoverStatus" class="muted"></span>
+                </div>
+                <div id="discoverList" class="list"></div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-title">Pair hub (link button required)</div>
+              <div class="panel-body">
+                <div class="form">
+                  <label>
+                    <span>Hub IP</span>
+                    <input id="pairHost" placeholder="192.168.1.10" />
+                  </label>
+                  <label>
+                    <span>Friendly name (optional)</span>
+                    <input id="pairName" placeholder="Living Room Bridge" />
+                  </label>
+                  <button id="btnPair" class="btn primary">Pair</button>
+                  <div id="pairStatus" class="muted"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="grid2">
+            <div class="panel">
+              <div class="panel-title">Art-Net</div>
+              <div class="panel-body">
+                <label>
+                  <span>Bind IP</span>
+                  <input id="artnetBindIp" placeholder="0.0.0.0" />
+                </label>
+                <p class="muted">
+                  This must be bound only once. All hubs share the same Art-Net listener.
+                </p>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-title">Configured hubs</div>
+              <div class="panel-body">
+                <div id="hubsList" class="list"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card" id="hubEditorCard" hidden>
+          <h2>Hub configuration</h2>
+          <div id="hubEditor"></div>
+        </section>
+
+        <section class="card">
+          <h2>Run</h2>
+          <div class="code">
+            <div>Build:</div>
+            <pre><code>npm run build</code></pre>
+            <div>Run (all hubs):</div>
+            <pre><code>artnet-hue-entertainment run</code></pre>
+          </div>
+          <p class="muted">
+            Tip: give each hub its own Art-Net universe (e.g. 11, 12, 13…) to avoid collisions.
+          </p>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
+
+

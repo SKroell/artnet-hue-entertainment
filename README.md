@@ -58,12 +58,22 @@ To start using ArtNet-Hue-Entertainment, take the following steps:
    Placement of the bulbs is not important and will be ignored.
 3. Discover Hue bridges on your network by running `artnet-hue-entertainment discover`.
    This will print a list of all Hue bridges and their IP address.
-4. Pair with a Hue bridge. To do so, first press the link button on the bridge.
+4. Pair with one or more Hue bridges. To do so, first press the link button on the bridge.
    Then run: `artnet-hue-entertainment pair --ip <ip address of bridge>`.
-5. Use `artnet-hue-entertertainment list-rooms` to find information of the Hue bulbs +
-   entertainment group. Configure them in TODO.
+5. (Recommended) Start the web UI to configure hubs, entertainment rooms and light DMX mapping:
+   `artnet-hue-entertainment web --port 8787`
 6. Run using `artnet-hue-entertertainment run`
 7. This project really is still work in progress. More to come!
+
+## Multiple Hue hubs (multiple entertainment areas)
+
+Hue only allows one active streaming entertainment session per hub. If you want to run multiple
+entertainment areas at the same time, you need multiple hubs.
+
+This project supports **multiple hubs at once**:
+- One shared Art-Net listener (UDP/6454) is started.
+- Each configured hub streams to its own entertainment room.
+- You can assign each hub its own Art-Net universe (recommended) to keep mappings separate.
 
 ## Channel modes
 DMX channel mode can be configured for every Hue light that is controlled.
