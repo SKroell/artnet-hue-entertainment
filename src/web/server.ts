@@ -40,6 +40,18 @@ export async function startWebUi(opts: {port: number; configPath?: string}) {
     }
   });
 
+  // Optional runtime status (only available when started from `run --web`)
+  const statusProvider = (opts as any).statusProvider as undefined | (() => any);
+  if (statusProvider) {
+    app.get('/api/status', (_req: express.Request, res: express.Response) => {
+      try {
+        res.json(statusProvider());
+      } catch (e: any) {
+        res.status(500).json({error: e?.message ?? 'Failed to read status'});
+      }
+    });
+  }
+
   app.put('/api/config', async (req: express.Request, res: express.Response) => {
     try {
       const cfg = normalizeConfig(req.body);

@@ -378,6 +378,81 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (config?.artnet) config.artnet.bindIp = e.target.value;
   });
   await loadConfig();
+  startStatusPolling();
 });
+
+function fmtAgo(now, ts) {
+  if (!ts) return 'never';
+  const ms = now - ts;
+  if (ms < 1000) return `${ms}ms ago`;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  return `${m}m ago`;
+}
+
+function startStatusPolling() {
+  const box = $('#statusBox');
+  const tick = async () => {
+    try {
+      const s = await api('GET', '/api/status');
+      const now = s.now || Date.now();
+      if (!s.artnet) {
+        box.className = 'muted';
+        box.textContent = 'Runtime not connected (start with run --web).';
+        return;
+      }
+      const hubs = Array.isArray(s.hubs) ? s.hubs : [];
+      const frames = s.artnet.framesTotal ?? 0;
+      const lastDmx = fmtAgo(now, s.artnet.lastDmxAt);
+      const unis = s.artnet.framesByUniverse || {};
+      const uniStr = Object.keys(unis).length
+        ? Object.entries(unis).map(([u, c]) => `U${u}:${c}`).join(' · ')
+        : 'none';
+
+      box.className = '';
+      box.innerHTML = `
+        <div class="item">
+          <div class="item-title">
+            <div><strong>Art-Net</strong></div>
+            <span class="pill">bind ${escapeHtml(s.artnet.bindIp || '')}</span>
+          </div>
+          <div class="muted">DMX frames: ${escapeHtml(frames)} · Last DMX: ${escapeHtml(lastDmx)} · By universe: ${escapeHtml(uniStr)}</div>
+        </div>
+        <div style="height:10px"></div>
+        ${hubs.map(h => {
+          const flags = [
+            h.dtlsConnected ? 'DTLS ok' : 'DTLS no',
+            h.streamingEnabled ? 'stream ok' : 'stream no',
+          ].join(' · ');
+          const warn = (!h.dmxFramesMatched || h.dmxFramesMatched === 0) && (frames > 0)
+            ? '<span class="pill" style="border-color: rgba(255,92,122,0.55); background: rgba(255,92,122,0.12)">no DMX on this universe</span>'
+            : '';
+          return `
+            <div class="item">
+              <div class="item-title">
+                <div>
+                  <strong>${escapeHtml(h.hubName || h.hubId)}</strong>
+                  <span class="pill">${escapeHtml(h.hubId)}</span>
+                  <span class="pill">U${escapeHtml(h.universe)}</span>
+                  ${warn}
+                </div>
+              </div>
+              <div class="muted">
+                ${escapeHtml(flags)} · Last hub DMX: ${escapeHtml(fmtAgo(now, h.lastDmxAt))} · Packets sent: ${escapeHtml(h.updatePacketsSent || 0)}
+                ${h.lastError ? `· Error: ${escapeHtml(h.lastError)}` : ''}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      `;
+    } catch (e) {
+      box.className = 'muted';
+      box.textContent = 'Runtime not connected (start with run --web).';
+    }
+  };
+  tick();
+  setInterval(tick, 1000);
+}
 
 

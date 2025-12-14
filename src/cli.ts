@@ -5,6 +5,7 @@ import {ConfigStore, getHubOrThrow, HubConfig, LightConfiguration, makeHubId} fr
 import {ArtNetDmxSource} from './artnet';
 import {HueEntertainmentRunner} from './hue-runner';
 import {startWebUi} from './web/server';
+import {RuntimeStatus} from './runtime-status';
 const LightState = v3.lightStates.LightState;
 
 class ArtNetHueEntertainmentCliHandler {
@@ -103,6 +104,9 @@ class ArtNetHueEntertainmentCliHandler {
         console.log('  list-lights             List all available lights.');
         console.log('  rename-lights-after-id  Renames every light after it`s id.');
         console.log('  run                     Run the ArtNet to Hue bridge.');
+        console.log('    --hub                 Hub id (defaults to all hubs).');
+        console.log('    --web                 Also start the web UI in the same process.');
+        console.log('    --web-port            Web UI port when used with run (default 8787).');
         console.log('  web                     Start a local web UI for configuring hubs.');
         console.log('    --port                Port for the web UI (default 8787).');
         process.exit(1);
@@ -195,7 +199,9 @@ class ArtNetHueEntertainmentCliHandler {
     }
 
     async startProcess(config: any, argv: string[]) {
-        const args = minimist(argv, {string: ['hub']});
+        const args = minimist(argv, {string: ['hub'], boolean: ['web'], default: {'web-port': 8787}});
+        const startWeb = !!args.web;
+        const webPort = Number(args['web-port']) || 8787;
         const hubs: HubConfig[] = Array.isArray(config.hubs) ? config.hubs : [];
         if (hubs.length === 0) {
             console.log('No Hue hub is paired yet. Please pair a hub first');
@@ -224,11 +230,12 @@ class ArtNetHueEntertainmentCliHandler {
             }
         });
 
+        const status = new RuntimeStatus();
         const bindIp = config.artnet?.bindIp ?? '0.0.0.0';
-        const dmxSource = new ArtNetDmxSource(bindIp);
+        const dmxSource = new ArtNetDmxSource(bindIp, status);
         dmxSource.start();
 
-        const runners = selectedHubs.map(h => new HueEntertainmentRunner(h));
+        const runners = selectedHubs.map(h => new HueEntertainmentRunner(h, status));
         await Promise.all(runners.map(r => r.start()));
 
         dmxSource.on('dmx', (dmx: any) => {
@@ -236,6 +243,13 @@ class ArtNetHueEntertainmentCliHandler {
                 runner.handleDmx(dmx);
             }
         });
+
+        if (startWeb) {
+            await startWebUi({
+                port: webPort,
+                statusProvider: () => status.snapshot(),
+            } as any);
+        }
 
         const shutdownHandler = () => {
             process.off('SIGINT', shutdownHandler);

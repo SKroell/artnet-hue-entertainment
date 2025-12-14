@@ -91,12 +91,22 @@
         </section>
 
         <section class="card">
+          <h2>Status / Debug</h2>
+          <p class="muted">
+            Live runtime status is available when you start streaming with <code>run --web</code>.
+          </p>
+          <div id="statusBox" class="muted">Not connected.</div>
+        </section>
+
+        <section class="card">
           <h2>Run</h2>
           <div class="code">
             <div>Build:</div>
             <pre><code>npm run build</code></pre>
             <div>Run (all hubs):</div>
             <pre><code>artnet-hue-entertainment run</code></pre>
+            <div>Run + web dashboard:</div>
+            <pre><code>artnet-hue-entertainment run --web --web-port 8787</code></pre>
           </div>
           <p class="muted">
             Tip: give each hub its own Art-Net universe (e.g. 11, 12, 13…) to avoid collisions.

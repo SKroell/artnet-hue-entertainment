@@ -4,15 +4,25 @@ import {HueDtlsController, ColorUpdate} from './hue-dtls';
 import {DmxLight, LIGHT_MODES} from './DmxLight';
 import {ArtDmx} from 'artnet-protocol/dist/protocol';
 import {HubConfig, LightConfiguration} from './config';
+import {RuntimeStatus} from './runtime-status';
 
 export class HueEntertainmentRunner {
   private readonly hub: HubConfig;
+  private readonly status?: RuntimeStatus;
   private hueApi: Api | null = null;
   private lights: DmxLight[] = [];
   private dtlsController: HueDtlsController | null = null;
 
-  constructor(hub: HubConfig) {
+  constructor(hub: HubConfig, status?: RuntimeStatus) {
     this.hub = hub;
+    this.status = status;
+    this.status?.upsertHub({
+      hubId: hub.id,
+      hubName: hub.name,
+      host: hub.host,
+      universe: hub.artNetUniverse,
+      entertainmentRoomId: hub.entertainmentRoomId,
+    });
   }
 
   get id() {
@@ -27,6 +37,7 @@ export class HueEntertainmentRunner {
     if (!this.hub.entertainmentRoomId) {
       throw new Error(`Hub "${this.hub.id}" has no entertainmentRoomId configured`);
     }
+    this.status?.setHubStarted(this.hub.id, true);
 
     this.hueApi = await v3.api.createLocal(this.hub.host).connect(this.hub.username);
 
@@ -60,6 +71,7 @@ export class HueEntertainmentRunner {
     console.log(`[${this.hub.id}] Requesting streaming mode...`);
     const streamingResponse = await this.hueApi.groups.enableStreaming(this.hub.entertainmentRoomId as any);
     console.log(`[${this.hub.id}] Streaming enabled:`, streamingResponse);
+    this.status?.setStreamingEnabled(this.hub.id, true);
 
     console.log(`[${this.hub.id}] Sleeping 1s to give the Hue bridge time to enable streaming mode`);
     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -67,12 +79,14 @@ export class HueEntertainmentRunner {
     console.log(`[${this.hub.id}] Performing streaming mode handshake...`);
     await this.dtlsController.connect();
     this.dtlsController.on('connected', () => this.onDtlsConnected());
+    this.dtlsController.on('close', () => this.status?.setDtlsConnected(this.hub.id, false));
   }
 
   handleDmx(dmx: ArtDmx) {
     if (dmx.universe !== this.hub.artNetUniverse) {
       return;
     }
+    this.status?.onHubDmxMatched(this.hub.id);
     if (!this.dtlsController) {
       return;
     }
@@ -83,6 +97,7 @@ export class HueEntertainmentRunner {
       colorUpdates.push({lightId: light.lightId, color: colors});
     });
     this.dtlsController.sendUpdate(colorUpdates);
+    this.status?.onHubPacketSent(this.hub.id);
   }
 
   async close() {
@@ -99,8 +114,10 @@ export class HueEntertainmentRunner {
 
   private onDtlsConnected() {
     console.log(`[${this.hub.id}] Connected to Hue Entertainment API`);
+    this.status?.setDtlsConnected(this.hub.id, true);
     const colorUpdates: ColorUpdate[] = this.lights.map(light => ({lightId: light.lightId, color: [0, 0, 0]}));
     this.dtlsController?.sendUpdate(colorUpdates);
+    this.status?.onHubPacketSent(this.hub.id);
   }
 }
 
