@@ -16,6 +16,15 @@ export type HubRuntimeStatus = {
   updatePacketsSent: number;
 
   lastError?: string;
+
+  lights: Record<string, LightRuntimeStatus>;
+};
+
+export type LightRuntimeStatus = {
+  lightId: number;
+  /** Last RGB values (16-bit, 0..65535) */
+  rgb16?: [number, number, number];
+  lastUpdateAt?: number;
 };
 
 export type ArtNetRuntimeStatus = {
@@ -66,6 +75,7 @@ export class RuntimeStatus {
       dtlsConnected: false,
       dmxFramesMatched: 0,
       updatePacketsSent: 0,
+      lights: {},
     };
   }
 
@@ -95,6 +105,16 @@ export class RuntimeStatus {
     h.updatePacketsSent += 1;
   }
 
+  onLightRgb(hubId: string, lightId: number, rgb16: [number, number, number]) {
+    const h = this.hubs[hubId];
+    if (!h) return;
+    const key = String(lightId);
+    const l = h.lights[key] ?? {lightId};
+    l.rgb16 = rgb16;
+    l.lastUpdateAt = Date.now();
+    h.lights[key] = l;
+  }
+
   setHubError(hubId: string, err: string) {
     const h = this.hubs[hubId];
     if (!h) return;
@@ -105,7 +125,12 @@ export class RuntimeStatus {
     return {
       now: Date.now(),
       artnet: this.artnet,
-      hubs: Object.values(this.hubs).sort((a, b) => a.hubId.localeCompare(b.hubId)),
+      hubs: Object.values(this.hubs)
+        .map(h => ({
+          ...h,
+          lights: Object.values(h.lights).sort((a, b) => a.lightId - b.lightId),
+        }))
+        .sort((a, b) => a.hubId.localeCompare(b.hubId)),
     };
   }
 }

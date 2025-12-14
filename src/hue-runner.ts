@@ -95,6 +95,7 @@ export class HueEntertainmentRunner {
       const dmxData = dmx.data.slice(light.dmxStart - 1, (light.dmxStart - 1) + light.channelWidth);
       const colors = light.getColorValue(dmxData);
       colorUpdates.push({lightId: light.lightId, color: colors});
+      this.status?.onLightRgb(this.hub.id, light.lightId, colors);
     });
     this.dtlsController.sendUpdate(colorUpdates);
     this.status?.onHubPacketSent(this.hub.id);

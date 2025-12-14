@@ -442,6 +442,7 @@ function startStatusPolling() {
                 ${escapeHtml(flags)} · Last hub DMX: ${escapeHtml(fmtAgo(now, h.lastDmxAt))} · Packets sent: ${escapeHtml(h.updatePacketsSent || 0)}
                 ${h.lastError ? `· Error: ${escapeHtml(h.lastError)}` : ''}
               </div>
+              ${renderHubLights(now, h)}
             </div>
           `;
         }).join('')}
@@ -453,6 +454,41 @@ function startStatusPolling() {
   };
   tick();
   setInterval(tick, 1000);
+}
+
+function rgb16ToRgb8(rgb16) {
+  if (!rgb16 || rgb16.length !== 3) return null;
+  return rgb16.map(v => Math.max(0, Math.min(255, Math.round(Number(v) / 257))));
+}
+
+function renderHubLights(now, hub) {
+  const lights = Array.isArray(hub.lights) ? hub.lights : [];
+  if (!lights.length) return '';
+  const rows = lights.map(l => {
+    const rgb8 = rgb16ToRgb8(l.rgb16);
+    const swatch = rgb8 ? `rgb(${rgb8[0]},${rgb8[1]},${rgb8[2]})` : 'transparent';
+    const label = rgb8 ? `${rgb8[0]}, ${rgb8[1]}, ${rgb8[2]}` : '—';
+    return `
+      <tr>
+        <td><span class="pill">${escapeHtml(l.lightId)}</span></td>
+        <td><span class="swatch" style="background:${escapeHtml(swatch)}"></span><span class="muted">${escapeHtml(label)}</span></td>
+        <td class="muted">${escapeHtml(fmtAgo(now, l.lastUpdateAt))}</td>
+      </tr>
+    `;
+  }).join('');
+  return `
+    <div style="height:10px"></div>
+    <table>
+      <thead>
+        <tr>
+          <th>Light</th>
+          <th>RGB (approx)</th>
+          <th>Last update</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
 }
 
 
