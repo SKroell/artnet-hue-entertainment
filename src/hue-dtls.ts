@@ -27,6 +27,8 @@ export class HueDtlsController extends EventEmitter {
     private lastUpdate: ColorUpdate[] | null = null;
     private lastUpdateTimestamp: Date | null = null;
     private updateKeepaliveTimeout: Timeout | null = null;
+    private lastPacketSentAtMs: number = 0;
+    private readonly minIntervalMs: number = 40;
 
     constructor(host: string, username: string, clientKey: string) {
         super();
@@ -58,6 +60,7 @@ export class HueDtlsController extends EventEmitter {
 
         socket.on('error', (err: any) => {
             console.log("UDP Stream interrupted, closing connection.\n", err);
+            this.emit('error', err);
             this.close();
         });
 
@@ -75,13 +78,13 @@ export class HueDtlsController extends EventEmitter {
         this.emit('close');
     }
 
-    public sendUpdate(updates: ColorUpdate[]) {
+    public sendUpdate(updates: ColorUpdate[]) : {sent: true} | {sent: false; reason: 'not_open' | 'skipped' | 'throttled'} {
         if (this.socket === null || !this.opened) {
-            return;
+            return {sent: false, reason: 'not_open' as const};
         }
         if (this.skip) {
             this.skip = false;
-            return;
+            return {sent: false, reason: 'skipped' as const};
         }
 
         //Skip every other update to reduce the amount of data sent to the bridge, removed for now
@@ -90,9 +93,17 @@ export class HueDtlsController extends EventEmitter {
         this.lastUpdateTimestamp = new Date();
 
         // TODO: Perhaps validate the input?
-        // TODO: Ensure there is 40ms between every call.
+        const now = Date.now();
+        if (this.lastPacketSentAtMs && now - this.lastPacketSentAtMs < this.minIntervalMs) {
+            return {sent: false, reason: 'throttled' as const};
+        }
 
-        this.sendUpdatePacket(updates);
+        const ok = this.sendUpdatePacket(updates);
+        if (ok) {
+            this.lastPacketSentAtMs = now;
+            return {sent: true as const};
+        }
+        return {sent: false, reason: 'not_open' as const};
     }
 
     private updateKeepalive() {
@@ -129,6 +140,8 @@ export class HueDtlsController extends EventEmitter {
 
         if (this.opened) {
             this.socket?.write(message);
+            return true;
         }
+        return false;
     }
 }

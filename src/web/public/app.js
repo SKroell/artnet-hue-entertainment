@@ -440,6 +440,7 @@ function startStatusPolling() {
               </div>
               <div class="muted">
                 ${escapeHtml(flags)} · Last hub DMX: ${escapeHtml(fmtAgo(now, h.lastDmxAt))} · Packets sent: ${escapeHtml(h.updatePacketsSent || 0)}
+                · Dropped: ${escapeHtml(h.updatePacketsDropped || 0)} · Throttled: ${escapeHtml(h.updatePacketsThrottled || 0)}
                 ${h.lastError ? `· Error: ${escapeHtml(h.lastError)}` : ''}
               </div>
               ${renderHubLights(now, h)}

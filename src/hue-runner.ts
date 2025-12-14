@@ -80,6 +80,10 @@ export class HueEntertainmentRunner {
     await this.dtlsController.connect();
     this.dtlsController.on('connected', () => this.onDtlsConnected());
     this.dtlsController.on('close', () => this.status?.setDtlsConnected(this.hub.id, false));
+    this.dtlsController.on('error', (err: any) => {
+      const msg = err?.message ? String(err.message) : String(err);
+      this.status?.setHubError(this.hub.id, `DTLS error: ${msg}`);
+    });
   }
 
   handleDmx(dmx: ArtDmx) {
@@ -97,8 +101,14 @@ export class HueEntertainmentRunner {
       colorUpdates.push({lightId: light.lightId, color: colors});
       this.status?.onLightRgb(this.hub.id, light.lightId, colors);
     });
-    this.dtlsController.sendUpdate(colorUpdates);
-    this.status?.onHubPacketSent(this.hub.id);
+    const res = this.dtlsController.sendUpdate(colorUpdates);
+    if (res.sent) {
+      this.status?.onHubPacketSent(this.hub.id);
+    } else if (res.reason === 'throttled') {
+      this.status?.onHubPacketThrottled(this.hub.id);
+    } else {
+      this.status?.onHubPacketDropped(this.hub.id);
+    }
   }
 
   async close() {
@@ -117,8 +127,10 @@ export class HueEntertainmentRunner {
     console.log(`[${this.hub.id}] Connected to Hue Entertainment API`);
     this.status?.setDtlsConnected(this.hub.id, true);
     const colorUpdates: ColorUpdate[] = this.lights.map(light => ({lightId: light.lightId, color: [0, 0, 0]}));
-    this.dtlsController?.sendUpdate(colorUpdates);
-    this.status?.onHubPacketSent(this.hub.id);
+    const res = this.dtlsController?.sendUpdate(colorUpdates);
+    if (res?.sent) {
+      this.status?.onHubPacketSent(this.hub.id);
+    }
   }
 }
 

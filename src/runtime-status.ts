@@ -14,6 +14,8 @@ export type HubRuntimeStatus = {
 
   dmxFramesMatched: number;
   updatePacketsSent: number;
+  updatePacketsDropped: number;
+  updatePacketsThrottled: number;
 
   lastError?: string;
 
@@ -75,6 +77,8 @@ export class RuntimeStatus {
       dtlsConnected: false,
       dmxFramesMatched: 0,
       updatePacketsSent: 0,
+      updatePacketsDropped: 0,
+      updatePacketsThrottled: 0,
       lights: {},
     };
   }
@@ -103,6 +107,18 @@ export class RuntimeStatus {
     if (!h) return;
     h.lastSendAt = Date.now();
     h.updatePacketsSent += 1;
+  }
+
+  onHubPacketDropped(hubId: string) {
+    const h = this.hubs[hubId];
+    if (!h) return;
+    h.updatePacketsDropped += 1;
+  }
+
+  onHubPacketThrottled(hubId: string) {
+    const h = this.hubs[hubId];
+    if (!h) return;
+    h.updatePacketsThrottled += 1;
   }
 
   onLightRgb(hubId: string, lightId: number, rgb16: [number, number, number]) {
