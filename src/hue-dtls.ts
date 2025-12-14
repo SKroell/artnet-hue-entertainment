@@ -15,7 +15,7 @@ export interface ColorUpdate {
 export class HueDtlsController extends EventEmitter {
 
     private readonly host: string;
-    private readonly username: string;
+    private readonly pskIdentity: string;
     private readonly clientKey: string;
     private readonly port = 2100;
 
@@ -30,10 +30,10 @@ export class HueDtlsController extends EventEmitter {
     private lastPacketSentAtMs: number = 0;
     private readonly minIntervalMs: number = 40;
 
-    constructor(host: string, username: string, clientKey: string) {
+    constructor(host: string, pskIdentity: string, clientKey: string) {
         super();
         this.host = host;
-        this.username = username;
+        this.pskIdentity = pskIdentity;
         this.clientKey = clientKey;
     }
 
@@ -43,7 +43,7 @@ export class HueDtlsController extends EventEmitter {
             remotePort: this.port,
             remoteAddress: this.host,
             maxHandshakeRetransmissions: 4,
-            pskIdentity: this.username,
+            pskIdentity: this.pskIdentity,
             pskSecret: Buffer.from(this.clientKey, 'hex'),
             cipherSuites: ['TLS_PSK_WITH_AES_128_GCM_SHA256'],
         };

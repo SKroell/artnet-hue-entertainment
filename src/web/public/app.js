@@ -479,6 +479,13 @@ function renderHubLights(now, hub) {
   }).join('');
   return `
     <div style="height:10px"></div>
+    <div class="row" style="margin: 6px 0 10px 0">
+      <span class="muted">Test hub stream:</span>
+      <button class="btn" onclick="testSolid('${escapeHtml(hub.hubId)}',255,0,0)">Red</button>
+      <button class="btn" onclick="testSolid('${escapeHtml(hub.hubId)}',0,255,0)">Green</button>
+      <button class="btn" onclick="testSolid('${escapeHtml(hub.hubId)}',0,0,255)">Blue</button>
+      <button class="btn" onclick="testSolid('${escapeHtml(hub.hubId)}',0,0,0)">Off</button>
+    </div>
     <table>
       <thead>
         <tr>
@@ -490,6 +497,14 @@ function renderHubLights(now, hub) {
       <tbody>${rows}</tbody>
     </table>
   `;
+}
+
+async function testSolid(hubId, r, g, b) {
+  try {
+    await api('POST', `/api/runtime/hubs/${encodeURIComponent(hubId)}/solid`, {r, g, b});
+  } catch (e) {
+    alert(e.message);
+  }
 }
 
 

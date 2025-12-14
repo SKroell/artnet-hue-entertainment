@@ -5,6 +5,7 @@ import {DmxLight, LIGHT_MODES} from './DmxLight';
 import {ArtDmx} from 'artnet-protocol/dist/protocol';
 import {HubConfig, LightConfiguration} from './config';
 import {RuntimeStatus} from './runtime-status';
+import {connectHueApi, getHueApplicationId} from './hue-api';
 
 export class HueEntertainmentRunner {
   private readonly hub: HubConfig;
@@ -39,7 +40,7 @@ export class HueEntertainmentRunner {
     }
     this.status?.setHubStarted(this.hub.id, true);
 
-    this.hueApi = await v3.api.createLocal(this.hub.host).connect(this.hub.username);
+    this.hueApi = await connectHueApi({host: this.hub.host, username: this.hub.username});
 
     const entertainment = await this.hueApi.groups.getEntertainment();
     const roomId = String(this.hub.entertainmentRoomId);
@@ -66,7 +67,8 @@ export class HueEntertainmentRunner {
     }
     this.lights = lights;
 
-    this.dtlsController = new HueDtlsController(this.hub.host, this.hub.username, this.hub.clientKey);
+    const hueApplicationId = await getHueApplicationId({host: this.hub.host, username: this.hub.username});
+    this.dtlsController = new HueDtlsController(this.hub.host, hueApplicationId, this.hub.clientKey);
 
     console.log(`[${this.hub.id}] Requesting streaming mode...`);
     const streamingResponse = await this.hueApi.groups.enableStreaming(this.hub.entertainmentRoomId as any);
@@ -121,6 +123,30 @@ export class HueEntertainmentRunner {
     if (api && this.hub.entertainmentRoomId) {
       await api.groups.disableStreaming(this.hub.entertainmentRoomId as any);
     }
+  }
+
+  /**
+   * Sends a solid color to all configured lights (bypasses Art-Net).
+   * Useful to validate DTLS streaming on a hub.
+   */
+  sendSolidColor(rgb16: [number, number, number]) {
+    if (!this.dtlsController) {
+      this.status?.onHubPacketDropped(this.hub.id);
+      return {sent: false as const, reason: 'not_open' as const};
+    }
+    const colorUpdates: ColorUpdate[] = this.lights.map(light => ({lightId: light.lightId, color: rgb16}));
+    for (const light of this.lights) {
+      this.status?.onLightRgb(this.hub.id, light.lightId, rgb16);
+    }
+    const res = this.dtlsController.sendUpdate(colorUpdates);
+    if (res.sent) {
+      this.status?.onHubPacketSent(this.hub.id);
+    } else if (res.reason === 'throttled') {
+      this.status?.onHubPacketThrottled(this.hub.id);
+    } else {
+      this.status?.onHubPacketDropped(this.hub.id);
+    }
+    return res;
   }
 
   private onDtlsConnected() {

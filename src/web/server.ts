@@ -2,6 +2,7 @@ import express = require('express');
 import path = require('path');
 import {discovery, v3, ApiError} from 'node-hue-api';
 import {ConfigStore, AppConfigV2, HubConfig, getHubOrThrow, makeHubId} from '../config';
+import {connectHueApi} from '../hue-api';
 
 function isObject(x: unknown): x is Record<string, any> {
   return typeof x === 'object' && x !== null;
@@ -23,7 +24,7 @@ function normalizeConfig(input: unknown): AppConfigV2 {
   return input as AppConfigV2;
 }
 
-export async function startWebUi(opts: {port: number; configPath?: string}) {
+export async function startWebUi(opts: {port: number; configPath?: string; statusProvider?: () => any; runtimeCommands?: any}) {
   const store = new ConfigStore(opts.configPath);
   const app = express();
   app.use(express.json({limit: '1mb'}));
@@ -41,7 +42,7 @@ export async function startWebUi(opts: {port: number; configPath?: string}) {
   });
 
   // Optional runtime status (only available when started from `run --web`)
-  const statusProvider = (opts as any).statusProvider as undefined | (() => any);
+  const statusProvider = opts.statusProvider as undefined | (() => any);
   if (statusProvider) {
     app.get('/api/status', (_req: express.Request, res: express.Response) => {
       try {
@@ -49,6 +50,23 @@ export async function startWebUi(opts: {port: number; configPath?: string}) {
       } catch (e: any) {
         res.status(500).json({error: e?.message ?? 'Failed to read status'});
       }
+    });
+  }
+
+  const runtimeCommands = opts.runtimeCommands as any;
+  if (runtimeCommands?.sendSolidColor) {
+    app.post('/api/runtime/hubs/:hubId/solid', (req: express.Request, res: express.Response) => {
+      const hubId = req.params.hubId;
+      const r = Number(req.body?.r);
+      const g = Number(req.body?.g);
+      const b = Number(req.body?.b);
+      if (![r, g, b].every(v => Number.isFinite(v) && v >= 0 && v <= 255)) {
+        res.status(400).json({error: 'Expected r,g,b in range 0..255'});
+        return;
+      }
+      const rgb16: [number, number, number] = [Math.round(r * 257), Math.round(g * 257), Math.round(b * 257)];
+      const out = runtimeCommands.sendSolidColor(hubId, rgb16);
+      res.json({ok: true, result: out});
     });
   }
 
@@ -79,7 +97,7 @@ export async function startWebUi(opts: {port: number; configPath?: string}) {
       return;
     }
     try {
-      const unauthApi = await v3.api.createLocal(host).connect();
+      const unauthApi = await connectHueApi({host});
       const user = await unauthApi.users.createUser('artnet-hue-entertainment', 'web');
       if (!user.clientkey) {
         res.status(400).json({error: 'Pairing did not return a client key. Is your bridge updated for Entertainment streaming?'});
@@ -89,7 +107,7 @@ export async function startWebUi(opts: {port: number; configPath?: string}) {
       let bridgeName: string | undefined = preferredName;
       let bridgeId: string | undefined = undefined;
       try {
-        const authApi = await v3.api.createLocal(host).connect(user.username);
+        const authApi = await connectHueApi({host, username: user.username});
         const cfg: any = await (authApi as any).configuration.getConfiguration();
         bridgeName = bridgeName ?? cfg?.name;
         bridgeId = cfg?.bridgeid;
@@ -136,7 +154,7 @@ export async function startWebUi(opts: {port: number; configPath?: string}) {
     try {
       const config = await store.load();
       const hub = getHubOrThrow(config, req.params.hubId);
-      const hueApi = await v3.api.createLocal(hub.host).connect(hub.username);
+      const hueApi = await connectHueApi({host: hub.host, username: hub.username});
       const rooms = await hueApi.groups.getEntertainment();
       res.json(rooms.map(r => ({id: String(r.id), name: r.name, lights: r.lights})));
     } catch (e: any) {
@@ -148,7 +166,7 @@ export async function startWebUi(opts: {port: number; configPath?: string}) {
     try {
       const config = await store.load();
       const hub = getHubOrThrow(config, req.params.hubId);
-      const hueApi = await v3.api.createLocal(hub.host).connect(hub.username);
+      const hueApi = await connectHueApi({host: hub.host, username: hub.username});
       const lights = await hueApi.lights.getAll();
       res.json(lights.map(l => ({id: l.id, name: l.name})));
     } catch (e: any) {
@@ -165,7 +183,7 @@ export async function startWebUi(opts: {port: number; configPath?: string}) {
     try {
       const config = await store.load();
       const hub = getHubOrThrow(config, req.params.hubId);
-      const hueApi = await v3.api.createLocal(hub.host).connect(hub.username);
+      const hueApi = await connectHueApi({host: hub.host, username: hub.username});
       await hueApi.lights.setLightState(
         lightId,
         new (v3.lightStates.LightState)().alert().alertShort(),

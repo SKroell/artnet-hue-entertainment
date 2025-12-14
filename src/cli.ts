@@ -6,6 +6,7 @@ import {ArtNetDmxSource} from './artnet';
 import {HueEntertainmentRunner} from './hue-runner';
 import {startWebUi} from './web/server';
 import {RuntimeStatus} from './runtime-status';
+import {connectHueApi} from './hue-api';
 const LightState = v3.lightStates.LightState;
 
 class ArtNetHueEntertainmentCliHandler {
@@ -57,7 +58,7 @@ class ArtNetHueEntertainmentCliHandler {
         const args = minimist(argv, {string: ['hub']});
         const hub = getHubOrThrow(config, args.hub);
 
-        const hueApi = await v3.api.createLocal(hub.host).connect(hub.username);
+        const hueApi = await connectHueApi({host: hub.host, username: hub.username});
 
         const rooms = await hueApi.groups.getEntertainment();
         if (!rooms.length) {
@@ -125,7 +126,7 @@ class ArtNetHueEntertainmentCliHandler {
 
         try {
             const host: string = String(args.ip);
-            const api = await v3.api.createLocal(host).connect();
+            const api = await connectHueApi({host});
             const user = await api.users.createUser('artnet-hue-entertainment', 'cli');
             if (!user.clientkey) {
                 throw new Error('Pairing did not return a client key. Is your bridge updated for Entertainment streaming?');
@@ -134,7 +135,7 @@ class ArtNetHueEntertainmentCliHandler {
             let bridgeName: string | undefined = args.name;
             let bridgeId: string | undefined = undefined;
             try {
-                const authApi = await v3.api.createLocal(host).connect(user.username);
+                const authApi = await connectHueApi({host, username: user.username});
                 // node-hue-api exposes configuration on v3
                 const cfg: any = await (authApi as any).configuration.getConfiguration();
                 bridgeName = bridgeName ?? cfg?.name;
@@ -237,6 +238,10 @@ class ArtNetHueEntertainmentCliHandler {
 
         const runners = selectedHubs.map(h => new HueEntertainmentRunner(h, status));
         await Promise.all(runners.map(r => r.start()));
+        const runnersById: Record<string, HueEntertainmentRunner> = {};
+        for (const r of runners) {
+            runnersById[r.id] = r;
+        }
 
         dmxSource.on('dmx', (dmx: any) => {
             for (const runner of runners) {
@@ -248,6 +253,15 @@ class ArtNetHueEntertainmentCliHandler {
             await startWebUi({
                 port: webPort,
                 statusProvider: () => status.snapshot(),
+                runtimeCommands: {
+                    sendSolidColor: (hubId: string, rgb16: [number, number, number]) => {
+                        const runner = runnersById[hubId];
+                        if (!runner) {
+                            return {sent: false as const, reason: 'unknown_hub' as const};
+                        }
+                        return runner.sendSolidColor(rgb16 as any);
+                    }
+                }
             } as any);
         }
 
@@ -266,7 +280,7 @@ class ArtNetHueEntertainmentCliHandler {
         const args = minimist(argv, {string: ['hub']});
         const hub = getHubOrThrow(config, args.hub);
 
-        const hueApi = await v3.api.createLocal(hub.host).connect(hub.username);
+        const hueApi = await connectHueApi({host: hub.host, username: hub.username});
 
         const rooms = await hueApi.groups.getEntertainment();
         const roomsCleaned = rooms.map(r => {
@@ -280,7 +294,7 @@ class ArtNetHueEntertainmentCliHandler {
         const args = minimist(argv, {string: ['hub']});
         const hub = getHubOrThrow(config, args.hub);
 
-        const hueApi = await v3.api.createLocal(hub.host).connect(hub.username);
+        const hueApi = await connectHueApi({host: hub.host, username: hub.username});
 
         const rooms = await hueApi.lights.getAll();
         const lightsCleaned = rooms.map(r => {
@@ -296,7 +310,7 @@ class ArtNetHueEntertainmentCliHandler {
         const args = minimist(argv, {string: ['hub']});
         const hub = getHubOrThrow(config, args.hub);
 
-        const hueApi = await v3.api.createLocal(hub.host).connect(hub.username);
+        const hueApi = await connectHueApi({host: hub.host, username: hub.username});
 
         const allLights = await hueApi.lights.getAll();
         for (const lightType of allLights) {
@@ -326,7 +340,7 @@ class ArtNetHueEntertainmentCliHandler {
         const lightId: string | number = args.id;
 
         const hub = getHubOrThrow(config, args.hub);
-        const hueApi = await v3.api.createLocal(hub.host).connect(hub.username);
+        const hueApi = await connectHueApi({host: hub.host, username: hub.username});
 
         if(lightId === "all"){
             const timer = (ms: number | undefined) => new Promise(res => setTimeout(res, ms))
