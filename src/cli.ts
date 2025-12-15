@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import * as minimist from 'minimist';
 import {v3, discovery, ApiError} from 'node-hue-api';
-import {ConfigStore, getHubOrThrow, HubConfig, LightConfiguration, makeHubId} from './config';
+import {ConfigStore, getHubOrThrow, HubConfig, ChannelConfiguration, makeHubId} from './config';
 import {ArtNetDmxSource} from './artnet';
 import {HueEntertainmentRunner} from './hue-runner';
 import {startWebUi} from './web/server';
 import {RuntimeStatus} from './runtime-status';
 import {connectHueApi} from './hue-api';
+import {listEntertainmentConfigurations} from './hue-v2';
 const LightState = v3.lightStates.LightState;
 
 class ArtNetHueEntertainmentCliHandler {
@@ -58,33 +59,30 @@ class ArtNetHueEntertainmentCliHandler {
         const args = minimist(argv, {string: ['hub']});
         const hub = getHubOrThrow(config, args.hub);
 
-        const hueApi = await connectHueApi({host: hub.host, username: hub.username});
-
-        const rooms = await hueApi.groups.getEntertainment();
-        if (!rooms.length) {
-            console.error('No entertainment rooms found on this hub.');
+        const configs = await listEntertainmentConfigurations({host: hub.host, appKey: hub.username});
+        if (!configs.length) {
+            console.error('No entertainment configurations found on this hub.');
             process.exit(1);
         }
 
-        // If not set, pick the first entertainment room.
-        if (!hub.entertainmentRoomId) {
-            hub.entertainmentRoomId = String(rooms[0].id);
+        if (!hub.entertainmentConfigurationId) {
+            hub.entertainmentConfigurationId = configs[0].id;
         }
-        const room = rooms.find(r => String(r.id) === hub.entertainmentRoomId) ?? rooms[0];
-        hub.entertainmentRoomId = String(room.id);
+        const cfg = configs.find(c => c.id === hub.entertainmentConfigurationId) ?? configs[0];
+        hub.entertainmentConfigurationId = cfg.id;
 
-        const sortedLights = room.lights.map((light, index) => {
+        const sortedChannels = cfg.channelIds.map((channelId, index) => {
             return {
-                "lightId": String(light),
-                "dmxStart": 3 * (index) + 1,
-                "channelMode": "8bit",
+                channelId: Number(channelId),
+                dmxStart: 3 * (index) + 1,
+                channelMode: "8bit",
             }
-        })
+        });
 
         console.log('Setting up lights...');
-        console.log(sortedLights);
+        console.log(sortedChannels);
 
-        hub.lights = sortedLights as any;
+        hub.channels = sortedChannels as any;
         await this.store.save(config);
     }
 
@@ -151,12 +149,12 @@ class ArtNetHueEntertainmentCliHandler {
                 host,
                 username: user.username,
                 clientKey: user.clientkey,
-                entertainmentRoomId: undefined,
+                entertainmentConfigurationId: undefined,
                 artNetUniverse: (config.hubs?.[0]?.artNetUniverse ?? 11),
-                lights: [],
+                channels: [],
             };
 
-            config.version = 2;
+            config.version = 3;
             config.artnet = config.artnet ?? {bindIp: '0.0.0.0'};
             config.hubs = Array.isArray(config.hubs) ? config.hubs : [];
 
@@ -169,7 +167,7 @@ class ArtNetHueEntertainmentCliHandler {
             await this.store.save(config);
 
             console.log(`Hue setup was successful! Added hub "${hubId}".`);
-            console.log('Next: choose an entertainment room (list-rooms) and configure lights (auto-setup or web UI).');
+            console.log('Next: choose an entertainment configuration (list-rooms) and configure channels (auto-setup or web UI).');
 
         } catch (e) {
             const error = e as ApiError;
@@ -216,17 +214,17 @@ class ArtNetHueEntertainmentCliHandler {
                 console.error(`Hub "${hub.id}" is missing credentials. Pair it again.`);
                 process.exit(1);
             }
-            if (!hub.entertainmentRoomId) {
-                console.error(`Hub "${hub.id}" has no entertainment room configured. Run list-rooms and set entertainmentRoomId (or use the web UI).`);
+            if (!hub.entertainmentConfigurationId) {
+                console.error(`Hub "${hub.id}" has no entertainment configuration configured. Run list-rooms and set entertainmentConfigurationId (or use the web UI).`);
                 process.exit(1);
             }
-            if (!Array.isArray(hub.lights) || hub.lights.length === 0) {
-                console.error(`Hub "${hub.id}" has no lights configured. Run auto-setup (or use the web UI).`);
+            if (!Array.isArray(hub.channels) || hub.channels.length === 0) {
+                console.error(`Hub "${hub.id}" has no channels configured. Run auto-setup (or use the web UI).`);
                 process.exit(1);
             }
-            if (hub.lights.some(light => light.channelMode === undefined || (light.channelMode !== "8bit" && light.channelMode !== "8bit-dimmable" && light.channelMode !== "16bit"))) {
-                const light = hub.lights.find(light => light.channelMode === undefined || (light.channelMode !== "8bit" && light.channelMode !== "8bit-dimmable" && light.channelMode !== "16bit"));
-                console.error(`Invalid channel mode in light configuration (hub ${hub.id}, lightId ${light!.lightId}). Valid values are: 8bit, 8bit-dimmable, 16bit`);
+            if (hub.channels.some((ch: ChannelConfiguration) => ch.channelMode === undefined || (ch.channelMode !== "8bit" && ch.channelMode !== "8bit-dimmable" && ch.channelMode !== "16bit"))) {
+                const ch = hub.channels.find((ch: ChannelConfiguration) => ch.channelMode === undefined || (ch.channelMode !== "8bit" && ch.channelMode !== "8bit-dimmable" && ch.channelMode !== "16bit"));
+                console.error(`Invalid channel mode in configuration (hub ${hub.id}, channelId ${ch!.channelId}). Valid values are: 8bit, 8bit-dimmable, 16bit`);
                 process.exit(1);
             }
         });
@@ -279,15 +277,11 @@ class ArtNetHueEntertainmentCliHandler {
     async listEntertainmentRooms(config: any, argv: string[]) {
         const args = minimist(argv, {string: ['hub']});
         const hub = getHubOrThrow(config, args.hub);
-
-        const hueApi = await connectHueApi({host: hub.host, username: hub.username});
-
-        const rooms = await hueApi.groups.getEntertainment();
-        const roomsCleaned = rooms.map(r => {
-            return " - Room " + r.id + ": " + r.name + " (Lights: " + r.lights.join(", ") + ")";
-        })
-        console.log(`Available entertainment rooms (hub ${hub.id}):`);
-        console.log(roomsCleaned.join(", "));
+        const rooms = await listEntertainmentConfigurations({host: hub.host, appKey: hub.username});
+        console.log(`Available entertainment configurations (hub ${hub.id}):`);
+        rooms.forEach(r => {
+            console.log(` - ${r.id}: ${r.name ?? '(no name)'} (Channels: ${r.channelIds.join(', ')})`);
+        });
     }
 
     async listAllLights(config: any, argv: string[]) {

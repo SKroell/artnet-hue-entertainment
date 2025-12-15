@@ -7,7 +7,11 @@
     "url": "https://github.com/jeffreykog/artnet-hue-entertainment.git"
   },
   "scripts": {
-    "build": "tsc && node scripts/copy-web-assets.js"
+    "build": "tsc && node scripts/copy-web-assets.js",
+    "start": "node build/cli.js run",
+    "start:web": "node build/cli.js web --port 8787",
+    "start:runweb": "node build/cli.js run --web --web-port 8787",
+    "start:discover": "node build/cli.js discover"
   },
   "author": {
     "name": "Jeffrey Kog",

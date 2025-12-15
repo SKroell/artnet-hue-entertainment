@@ -24,7 +24,7 @@ export async function connectHueApi(opts: {host: string; username?: string; allo
  * Per Hue Entertainment guide: DTLS PSK identity should be the `hue-application-id`
  * returned as a response header from GET /auth/v1 with hue-application-key.
  *
- * We do a best-effort HTTPS request and fall back to `username` if not available.
+ * Uses HTTPS and falls back to `username` if the application id cannot be retrieved.
  */
 export async function getHueApplicationId(opts: {host: string; username: string}): Promise<string> {
   const {host, username} = opts;
@@ -38,8 +38,7 @@ export async function getHueApplicationId(opts: {host: string; username: string}
         headers: {
           'hue-application-key': username,
         },
-        // Hue bridges use a private CA; for now we allow this so it works out of the box.
-        // (If you want strict validation, we can add CA bundle support later.)
+        // Hue bridges use a private CA. For now we skip CA validation for local network usage.
         rejectUnauthorized: false,
       } as any,
       (res) => {

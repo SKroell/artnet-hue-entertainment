@@ -112,7 +112,7 @@ function renderHubEditor() {
   }
   card.hidden = false;
 
-  const entId = hub.entertainmentRoomId ?? '';
+  const entId = hub.entertainmentConfigurationId ?? '';
   root.innerHTML = `
     <div class="grid2">
       <div class="panel">
@@ -134,8 +134,8 @@ function renderHubEditor() {
         <div class="panel-title">Entertainment room</div>
         <div class="panel-body form">
           <label>
-            <span>Selected room id</span>
-            <input id="hubRoomId" placeholder="Pick a room below" value="${escapeHtml(entId)}" />
+            <span>Selected entertainment configuration UUID</span>
+            <input id="hubRoomId" placeholder="Pick one below" value="${escapeHtml(entId)}" />
           </label>
           <div id="roomsList" class="list"></div>
         </div>
@@ -145,13 +145,13 @@ function renderHubEditor() {
     <div class="divider"></div>
 
     <div class="panel">
-      <div class="panel-title">Lights (DMX mapping)</div>
+        <div class="panel-title">Channels (DMX mapping)</div>
       <div class="panel-body">
         <div class="row">
           <button id="btnAutoMap" class="btn">Auto-map (sequential RGB)</button>
           <button id="btnAutoMapDimmable" class="btn">Auto-map (dimmable)</button>
         </div>
-        <div id="lightsTableWrap" class="muted" style="margin-top:10px;">Load rooms, pick a room, then map lights.</div>
+          <div id="lightsTableWrap" class="muted" style="margin-top:10px;">Load configurations, pick one, then map channels.</div>
       </div>
     </div>
   `;
@@ -161,7 +161,7 @@ function renderHubEditor() {
   $('#hubUniverse').addEventListener('input', (e) => hub.artNetUniverse = Number(e.target.value || 0));
   $('#hubRoomId').addEventListener('input', (e) => {
     const v = String(e.target.value || '').trim();
-    hub.entertainmentRoomId = v.length ? v : undefined;
+    hub.entertainmentConfigurationId = v.length ? v : undefined;
   });
 
   $('#btnLoadRooms').addEventListener('click', async () => {
@@ -209,16 +209,16 @@ function renderRoomsList(hub, rooms) {
       <div class="item-title">
         <div>
           <strong>${escapeHtml(r.name || `Room ${r.id}`)}</strong>
-          <span class="pill">id ${escapeHtml(r.id)}</span>
+          <span class="pill">uuid ${escapeHtml(r.id)}</span>
         </div>
         <button class="btn" data-act="select">Select</button>
       </div>
-      <div class="muted">Lights: ${escapeHtml((r.lights || []).join(', '))}</div>
+      <div class="muted">Channels: ${escapeHtml((r.channelIds || []).join(', '))}</div>
     `;
     div.querySelector('[data-act="select"]').addEventListener('click', () => {
-      hub.entertainmentRoomId = String(r.id);
+      hub.entertainmentConfigurationId = String(r.id);
       $('#hubRoomId').value = String(r.id);
-      hub._selectedRoomLights = r.lights || [];
+      hub._selectedRoomLights = r.channelIds || [];
       renderLightsTable(hub);
     });
     root.appendChild(div);
@@ -228,12 +228,12 @@ function renderRoomsList(hub, rooms) {
 function autoMap(hub, mode) {
   const roomLights = hub._selectedRoomLights || [];
   if (!roomLights.length) {
-    alert('Select an entertainment room first (Load rooms → Select).');
+    alert('Select an entertainment configuration first (Load entertainment rooms → Select).');
     return;
   }
   const width = mode === '8bit-dimmable' ? 4 : mode === '16bit' ? 6 : 3;
-  hub.lights = roomLights.map((id, idx) => ({
-    lightId: String(id),
+  hub.channels = roomLights.map((id, idx) => ({
+    channelId: Number(id),
     dmxStart: (idx * width) + 1,
     channelMode: mode,
   }));
@@ -243,37 +243,36 @@ function autoMap(hub, mode) {
 function renderLightsTable(hub) {
   const wrap = $('#lightsTableWrap');
   const roomLights = hub._selectedRoomLights || [];
-  const hasRoom = !!hub.entertainmentRoomId;
+  const hasRoom = !!hub.entertainmentConfigurationId;
   if (!hasRoom) {
-    wrap.innerHTML = `<div class="muted">Select an entertainment room to map lights.</div>`;
+    wrap.innerHTML = `<div class="muted">Select an entertainment configuration to map channels.</div>`;
     return;
   }
 
   // If we don't know the room's lights list yet, still show current config.
-  const lightIds = roomLights.length ? roomLights.map(String) : (hub.lights || []).map(l => String(l.lightId));
-  if (!lightIds.length) {
-    wrap.innerHTML = `<div class="muted">No lights available. Load rooms and select one, then auto-map.</div>`;
+  const ids = roomLights.length ? roomLights.map(Number) : (hub.channels || []).map(c => Number(c.channelId));
+  if (!ids.length) {
+    wrap.innerHTML = `<div class="muted">No channels available. Load entertainment configurations and select one, then auto-map.</div>`;
     return;
   }
 
   // Ensure every room light has a mapping row.
-  const byId = new Map((hub.lights || []).map(l => [String(l.lightId), l]));
-  const rows = lightIds.map(id => byId.get(String(id)) || {lightId: String(id), dmxStart: '', channelMode: '8bit-dimmable'});
+  const byId = new Map((hub.channels || []).map(c => [Number(c.channelId), c]));
+  const rows = ids.map(id => byId.get(Number(id)) || {channelId: Number(id), dmxStart: '', channelMode: '8bit-dimmable'});
 
   wrap.innerHTML = `
     <table>
       <thead>
         <tr>
-          <th>Light id</th>
+          <th>Channel id</th>
           <th>DMX start</th>
           <th>Mode</th>
-          <th>Test</th>
         </tr>
       </thead>
       <tbody>
         ${rows.map(r => `
-          <tr data-id="${escapeHtml(r.lightId)}">
-            <td><span class="pill">${escapeHtml(r.lightId)}</span></td>
+          <tr data-id="${escapeHtml(r.channelId)}">
+            <td><span class="pill">${escapeHtml(r.channelId)}</span></td>
             <td><input class="dmxStart" type="number" min="1" max="512" value="${escapeHtml(r.dmxStart)}" placeholder="e.g. 1" /></td>
             <td>
               <select class="mode">
@@ -282,7 +281,6 @@ function renderLightsTable(hub) {
                 <option value="16bit" ${r.channelMode === '16bit' ? 'selected' : ''}>16bit (RGB fine)</option>
               </select>
             </td>
-            <td><button class="btn ping">Ping</button></td>
           </tr>
         `).join('')}
       </tbody>
@@ -294,16 +292,15 @@ function renderLightsTable(hub) {
     const id = tr.getAttribute('data-id');
     const dmxInput = tr.querySelector('.dmxStart');
     const modeSel = tr.querySelector('.mode');
-    const pingBtn = tr.querySelector('.ping');
 
     const ensure = () => {
-      if (!hub.lights) hub.lights = [];
-      const idx = hub.lights.findIndex(l => String(l.lightId) === String(id));
+      if (!hub.channels) hub.channels = [];
+      const idx = hub.channels.findIndex(c => String(c.channelId) === String(id));
       if (idx === -1) {
-        hub.lights.push({lightId: String(id), dmxStart: 1, channelMode: '8bit-dimmable'});
-        return hub.lights[hub.lights.length - 1];
+        hub.channels.push({channelId: Number(id), dmxStart: 1, channelMode: '8bit-dimmable'});
+        return hub.channels[hub.channels.length - 1];
       }
-      return hub.lights[idx];
+      return hub.channels[idx];
     };
 
     dmxInput.addEventListener('input', () => {
@@ -313,13 +310,6 @@ function renderLightsTable(hub) {
     modeSel.addEventListener('change', () => {
       const l = ensure();
       l.channelMode = modeSel.value;
-    });
-    pingBtn.addEventListener('click', async () => {
-      try {
-        await api('POST', `/api/hubs/${encodeURIComponent(hub.id)}/ping`, {lightId: id});
-      } catch (e) {
-        alert(e.message);
-      }
     });
   });
 }
@@ -489,7 +479,7 @@ function renderHubLights(now, hub) {
     <table>
       <thead>
         <tr>
-          <th>Light</th>
+          <th>Channel</th>
           <th>RGB (approx)</th>
           <th>Last update</th>
         </tr>

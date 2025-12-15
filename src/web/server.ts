@@ -1,18 +1,19 @@
 import express = require('express');
 import path = require('path');
 import {discovery, v3, ApiError} from 'node-hue-api';
-import {ConfigStore, AppConfigV2, HubConfig, getHubOrThrow, makeHubId} from '../config';
+import {ConfigStore, AppConfigV3, HubConfig, getHubOrThrow, makeHubId} from '../config';
 import {connectHueApi} from '../hue-api';
+import {listEntertainmentConfigurations} from '../hue-v2';
 
 function isObject(x: unknown): x is Record<string, any> {
   return typeof x === 'object' && x !== null;
 }
 
-function normalizeConfig(input: unknown): AppConfigV2 {
+function normalizeConfig(input: unknown): AppConfigV3 {
   if (!isObject(input)) {
     throw new Error('Invalid config');
   }
-  if (input.version !== 2) {
+  if (input.version !== 3) {
     throw new Error('Unsupported config version');
   }
   if (!isObject(input.artnet) || typeof input.artnet.bindIp !== 'string') {
@@ -21,7 +22,7 @@ function normalizeConfig(input: unknown): AppConfigV2 {
   if (!Array.isArray(input.hubs)) {
     throw new Error('Invalid hubs list');
   }
-  return input as AppConfigV2;
+  return input as AppConfigV3;
 }
 
 export async function startWebUi(opts: {port: number; configPath?: string; statusProvider?: () => any; runtimeCommands?: any}) {
@@ -123,9 +124,9 @@ export async function startWebUi(opts: {port: number; configPath?: string; statu
         host,
         username: user.username,
         clientKey: user.clientkey,
-        entertainmentRoomId: undefined,
+        entertainmentConfigurationId: undefined,
         artNetUniverse: (config.hubs?.[0]?.artNetUniverse ?? 11),
-        lights: [],
+        channels: [],
       };
 
       const hubs = Array.isArray(config.hubs) ? config.hubs : [];
@@ -137,6 +138,7 @@ export async function startWebUi(opts: {port: number; configPath?: string; statu
       }
 
       config.hubs = hubs;
+      config.version = 3 as any;
       await store.save(config);
       res.json({ok: true, hub});
     } catch (e) {
@@ -154,9 +156,8 @@ export async function startWebUi(opts: {port: number; configPath?: string; statu
     try {
       const config = await store.load();
       const hub = getHubOrThrow(config, req.params.hubId);
-      const hueApi = await connectHueApi({host: hub.host, username: hub.username});
-      const rooms = await hueApi.groups.getEntertainment();
-      res.json(rooms.map(r => ({id: String(r.id), name: r.name, lights: r.lights})));
+      const rooms = await listEntertainmentConfigurations({host: hub.host, appKey: hub.username});
+      res.json(rooms.map(r => ({id: r.id, name: r.name, channelIds: r.channelIds})));
     } catch (e: any) {
       res.status(500).json({error: e?.message ?? 'Failed to load rooms'});
     }

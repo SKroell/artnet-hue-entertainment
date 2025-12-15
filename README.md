@@ -19,9 +19,9 @@ lights, even with perfect synchronization between the lights.
 This is called the Hue Entertainment API.
 
 To accomplish this, the Hue Bridge sends the entire update packet, which contains
-color information for all bulbs in the Entertainment group, to a 'Proxy' bulb.
+color information for all bulbs in the Entertainment area, to a 'Proxy' bulb.
 This is a bulb that is elected by the Hue bridge to be near all other bulbs in the
-Entertainment group. It will receive the full color update for all bulbs and it will
+Entertainment area. It will receive the full color update for all bulbs and it will
 broadcast the message so all bulbs receive it. Then every individual bulb will only
 take it's own color from the update message and apply it.
 This accomplishes near-perfect synchronization.
@@ -35,35 +35,82 @@ another project which talks to the normal Hue API, such as [Dmx-Hue](https://git
 
 ## Setting up
 
-## Building typescript
-
-Install typescript, build and install the project with:
+## Build
 
 ```bash
-npm i typescript --save-dev
-npx tsc
-npm install .
+npm install
+npm run build
 ```
 
 
 ## Configuration
 
-To start using ArtNet-Hue-Entertainment, take the following steps:
-1. First, open the Philips Hue app on your phone
-   and setup a new Entertainment group.
-   This can be done by navigating to `Settings > Entertainment rooms`.
-2. If you don't have an entertainment group yet, create one by tapping
-   the blue plus button on the top right, give the entertainment room a name
-   and select some lights.
-   Placement of the bulbs is not important and will be ignored.
-3. Discover Hue bridges on your network by running `artnet-hue-entertainment discover`.
-   This will print a list of all Hue bridges and their IP address.
-4. Pair with one or more Hue bridges. To do so, first press the link button on the bridge.
-   Then run: `artnet-hue-entertainment pair --ip <ip address of bridge>`.
-5. (Recommended) Start the web UI to configure hubs, entertainment rooms and light DMX mapping:
-   `artnet-hue-entertainment web --port 8787`
-6. Run using `artnet-hue-entertertainment run`
-7. This project really is still work in progress. More to come!
+Before configuring this project:
+1. In the Philips Hue app, create an **Entertainment area** (`Settings > Entertainment rooms`).
+2. Ensure the area has lights assigned (placement is ignored by this project).
+
+### Configuration (Web UI)
+1. Start the web UI:
+
+```bash
+npm run start:web
+```
+
+2. In the UI:
+   - Use **Discover** to find hubs on your network
+   - Use **Pair** to connect (press the link button on the hub first)
+
+3. For each hub:
+   - Select an **entertainment configuration UUID**
+   - Map DMX to **channel ids** (auto-map buttons available)
+
+4. Run:
+
+```bash
+npm run start
+```
+
+Optional: run + web dashboard (recommended while debugging):
+
+```bash
+npm run start:runweb
+```
+
+### Configuration (CLI-only)
+1. Discover Hue bridges:
+
+```bash
+npm run start:discover
+```
+
+2. Pair one or more bridges (press the link button first):
+
+```bash
+node build/cli.js pair --ip <ip address of bridge>
+```
+
+3. List entertainment configurations (UUIDs) for a hub:
+
+```bash
+node build/cli.js list-rooms --hub <hub id>
+```
+
+4. Choose a configuration and map DMX channels:
+   - Quick setup: run auto-setup (sequential RGB mapping):
+
+```bash
+node build/cli.js auto-setup --hub <hub id>
+```
+
+   - Or edit `config.json` manually:
+     - Set `hubs[].entertainmentConfigurationId` to the chosen UUID
+     - Configure `hubs[].channels[]` with `channelId`, `dmxStart`, `channelMode`
+
+5. Run:
+
+```bash
+npm run start
+```
 
 ## Multiple Hue hubs (multiple entertainment areas)
 
@@ -72,8 +119,14 @@ entertainment areas at the same time, you need multiple hubs.
 
 This project supports **multiple hubs at once**:
 - One shared Art-Net listener (UDP/6454) is started.
-- Each configured hub streams to its own entertainment room.
+- Each configured hub streams to its own entertainment configuration (UUID).
 - You can assign each hub its own Art-Net universe (recommended) to keep mappings separate.
+
+## Config format (v3)
+
+This project uses Hue CLIP v2 entertainment configurations:
+- `entertainmentConfigurationId`: the **UUID** of the entertainment configuration on the hub
+- `channels[]`: DMX mapping by **entertainment channel id** (0..), not Hue light id
 
 ## Channel modes
 DMX channel mode can be configured for every Hue light that is controlled.

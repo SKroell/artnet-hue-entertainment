@@ -5,9 +5,15 @@ import { Socket } from 'net';
 
 const PACKET_HEADER = Buffer.from([0x48, 0x75, 0x65, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d]);
 
+function assertUuid36(id: string) {
+    if (typeof id !== 'string' || id.length !== 36) {
+        throw new Error(`entertainmentConfigurationId must be a 36-char UUID, got "${id}"`);
+    }
+}
+
 
 export interface ColorUpdate {
-    lightId: number;
+    channelId: number;
     color: [number, number, number];
 }
 
@@ -17,6 +23,7 @@ export class HueDtlsController extends EventEmitter {
     private readonly host: string;
     private readonly pskIdentity: string;
     private readonly clientKey: string;
+    private readonly entertainmentConfigurationId: string;
     private readonly port = 2100;
 
     private socket: Socket | null = null;
@@ -30,11 +37,13 @@ export class HueDtlsController extends EventEmitter {
     private lastPacketSentAtMs: number = 0;
     private readonly minIntervalMs: number = 40;
 
-    constructor(host: string, pskIdentity: string, clientKey: string) {
+    constructor(host: string, pskIdentity: string, clientKey: string, entertainmentConfigurationId: string) {
         super();
         this.host = host;
         this.pskIdentity = pskIdentity;
         this.clientKey = clientKey;
+        assertUuid36(entertainmentConfigurationId);
+        this.entertainmentConfigurationId = entertainmentConfigurationId;
     }
 
     async connect() {
@@ -117,23 +126,26 @@ export class HueDtlsController extends EventEmitter {
     }
 
     private sendUpdatePacket(updates: ColorUpdate[]) {
-        const message = Buffer.alloc(16 + (updates.length * 9), 0x00);
+        // Hue Entertainment v2 format:
+        // 16-byte header + 36-byte entertainment_configuration UUID + N*(1-byte channel id + 3*2-byte RGB16)
+        const message = Buffer.alloc(16 + 36 + (updates.length * 7), 0x00);
         PACKET_HEADER.copy(message, 0);
-        message.writeUInt8(1, 9);  // Major version
+        message.writeUInt8(2, 9);  // Major version
         message.writeUInt8(0, 10);  // Minor version
         message.writeUInt8(0, 11);  // Sequence. This is currently ignored
         message.writeUInt16BE(0, 12);  // Reserved
         message.writeUInt8(0, 14);  // Color space RGB
         message.writeUInt8(0, 15);  // Reserved
 
-        let offset = 16;
+        message.write(this.entertainmentConfigurationId, 16, 36, 'ascii');
+
+        let offset = 16 + 36;
         updates.forEach(update => {
-            message.writeUInt8(0, offset);  // Device type: Light
-            message.writeUInt16BE(update.lightId, offset + 1);  // Light ID
-            message.writeUInt16BE(update.color[0], offset + 3);  // R
-            message.writeUInt16BE(update.color[1], offset + 5);  // G
-            message.writeUInt16BE(update.color[2], offset + 7);  // B
-            offset += 9;
+            message.writeUInt8(update.channelId & 0xff, offset);  // Channel ID
+            message.writeUInt16BE(update.color[0], offset + 1);  // R
+            message.writeUInt16BE(update.color[1], offset + 3);  // G
+            message.writeUInt16BE(update.color[2], offset + 5);  // B
+            offset += 7;
         });
 
         // console.log(message.toString('hex').match(/../g)!.join(' '));

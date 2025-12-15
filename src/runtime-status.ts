@@ -3,7 +3,7 @@ export type HubRuntimeStatus = {
   hubName?: string;
   host?: string;
   universe: number;
-  entertainmentRoomId?: string;
+  entertainmentConfigurationId?: string;
 
   started: boolean;
   streamingEnabled: boolean;
@@ -57,13 +57,13 @@ export class RuntimeStatus {
     this.artnet.framesByUniverse[key] = (this.artnet.framesByUniverse[key] ?? 0) + 1;
   }
 
-  upsertHub(base: {hubId: string; hubName?: string; host?: string; universe: number; entertainmentRoomId?: string}) {
+  upsertHub(base: {hubId: string; hubName?: string; host?: string; universe: number; entertainmentConfigurationId?: string}) {
     const existing = this.hubs[base.hubId];
     if (existing) {
       existing.hubName = base.hubName;
       existing.host = base.host;
       existing.universe = base.universe;
-      existing.entertainmentRoomId = base.entertainmentRoomId;
+      existing.entertainmentConfigurationId = base.entertainmentConfigurationId;
       return;
     }
     this.hubs[base.hubId] = {
@@ -71,7 +71,7 @@ export class RuntimeStatus {
       hubName: base.hubName,
       host: base.host,
       universe: base.universe,
-      entertainmentRoomId: base.entertainmentRoomId,
+      entertainmentConfigurationId: base.entertainmentConfigurationId,
       started: false,
       streamingEnabled: false,
       dtlsConnected: false,

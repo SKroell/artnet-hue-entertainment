@@ -3,9 +3,10 @@ import {ChannelModeType} from './const';
 
 export const CONFIG_FILE_PATH = 'config.json';
 
-export interface LightConfiguration {
+export interface ChannelConfiguration {
   dmxStart: number;
-  lightId: string;
+  /** Entertainment channel id (0..). */
+  channelId: number;
   channelMode: ChannelModeType;
 }
 
@@ -16,15 +17,15 @@ export interface HubConfig {
   host: string;
   username: string;
   clientKey: string;
-  /** Hue Entertainment group id to stream to (one per hub). */
-  entertainmentRoomId?: string;
+  /** Hue Entertainment configuration UUID to stream to (one per hub). */
+  entertainmentConfigurationId?: string;
   /** Art-Net universe to listen to for this hub. */
   artNetUniverse: number;
-  lights: LightConfiguration[];
+  channels: ChannelConfiguration[];
 }
 
-export interface AppConfigV2 {
-  version: 2;
+export interface AppConfigV3 {
+  version: 3;
   artnet: {
     /** IP to bind the Art-Net listener to (UDP/6454). */
     bindIp: string;
@@ -34,11 +35,26 @@ export interface AppConfigV2 {
 
 type LegacyConfigV1 = {
   artnet?: {host?: string; universe?: number};
-  hue?: {host?: string; username?: string; clientKey?: string; lights?: LightConfiguration[]};
+  hue?: {host?: string; username?: string; clientKey?: string; lights?: any[]};
 };
 
-const DEFAULT_CONFIG: AppConfigV2 = {
-  version: 2,
+type AppConfigV2Like = {
+  version: 2;
+  artnet: {bindIp: string};
+  hubs: Array<{
+    id: string;
+    name?: string;
+    host: string;
+    username: string;
+    clientKey: string;
+    entertainmentRoomId?: string;
+    artNetUniverse: number;
+    lights: Array<{dmxStart: number; lightId: string; channelMode: ChannelModeType}>;
+  }>;
+};
+
+const DEFAULT_CONFIG: AppConfigV3 = {
+  version: 3,
   artnet: {bindIp: '0.0.0.0'},
   hubs: [],
 };
@@ -82,7 +98,7 @@ export class ConfigStore {
     }
   }
 
-  async load(): Promise<AppConfigV2> {
+  async load(): Promise<AppConfigV3> {
     await this.ensureExists();
     const raw = await readFile(this.path, 'utf-8');
     let parsed: unknown;
@@ -102,10 +118,10 @@ export class ConfigStore {
     return migrated.config;
   }
 
-  async save(config: AppConfigV2) {
+  async save(config: AppConfigV3) {
     // Minimal validation/sanitization
-    if (!config || config.version !== 2) {
-      throw new Error('Refusing to save invalid config (expected version 2)');
+    if (!config || (config as any).version !== 3) {
+      throw new Error('Refusing to save invalid config (expected version 3)');
     }
     if (!config.artnet?.bindIp) {
       config.artnet = {bindIp: '0.0.0.0'};
@@ -116,10 +132,38 @@ export class ConfigStore {
     await writeFile(this.path, JSON.stringify(config, null, 2), 'utf-8');
   }
 
-  private migrateIfNeeded(parsed: unknown): {didMigrate: boolean; config: AppConfigV2} {
-    // Already v2?
-    if (isObject(parsed) && parsed.version === 2 && isObject(parsed.artnet) && Array.isArray(parsed.hubs)) {
-      return {didMigrate: false, config: parsed as AppConfigV2};
+  private migrateIfNeeded(parsed: unknown): {didMigrate: boolean; config: AppConfigV3} {
+    // Already v3?
+    if (isObject(parsed) && parsed.version === 3 && isObject(parsed.artnet) && Array.isArray(parsed.hubs)) {
+      return {didMigrate: false, config: parsed as AppConfigV3};
+    }
+
+    // v2 -> v3
+    if (isObject(parsed) && parsed.version === 2 && isObject((parsed as any).artnet) && Array.isArray((parsed as any).hubs)) {
+      const v2 = parsed as AppConfigV2Like;
+      const hubs: HubConfig[] = (v2.hubs ?? []).map(h => {
+        const ent = h.entertainmentRoomId;
+        const looksLikeUuid = typeof ent === 'string' && ent.length === 36 && ent.includes('-');
+        return {
+          id: h.id,
+          name: h.name,
+          host: h.host,
+          username: h.username,
+          clientKey: h.clientKey,
+          entertainmentConfigurationId: looksLikeUuid ? ent : undefined,
+          artNetUniverse: h.artNetUniverse ?? 0,
+          // Best-effort: map old numeric lightId -> channelId (may not match; user can re-map in UI).
+          channels: (h.lights ?? []).map(l => ({
+            dmxStart: l.dmxStart,
+            channelId: Number.parseInt(String(l.lightId), 10),
+            channelMode: l.channelMode,
+          })).filter(c => Number.isFinite(c.channelId)),
+        };
+      });
+      return {
+        didMigrate: true,
+        config: {version: 3, artnet: {bindIp: v2.artnet?.bindIp ?? DEFAULT_CONFIG.artnet.bindIp}, hubs},
+      };
     }
 
     // Legacy v1?
@@ -130,7 +174,6 @@ export class ConfigStore {
       const host = legacy.hue?.host;
       const username = legacy.hue?.username;
       const clientKey = legacy.hue?.clientKey;
-      const lights = legacy.hue?.lights ?? [];
 
       const hubs: HubConfig[] = [];
       if (host && username && clientKey) {
@@ -141,15 +184,15 @@ export class ConfigStore {
           username,
           clientKey,
           // Not present in legacy config. User must select in UI/CLI.
-          entertainmentRoomId: undefined,
+          entertainmentConfigurationId: undefined,
           artNetUniverse: universe,
-          lights,
+          channels: [],
         });
       }
 
       return {
         didMigrate: true,
-        config: {version: 2, artnet: {bindIp}, hubs},
+        config: {version: 3, artnet: {bindIp}, hubs},
       };
     }
 
@@ -168,7 +211,7 @@ export class ConfigStore {
   }
 }
 
-export function getHubOrThrow(config: AppConfigV2, hubId?: string): HubConfig {
+export function getHubOrThrow(config: AppConfigV3, hubId?: string): HubConfig {
   if (config.hubs.length === 0) {
     throw new Error('No Hue hubs configured. Pair a hub first (CLI: pair, or UI: web).');
   }
